@@ -218,7 +218,7 @@ async function startExtraction() {
 
   addLog(`[${new Date().toLocaleTimeString()}] Starting extraction: "${keyword} in ${location}"`);
   addLog(`[${new Date().toLocaleTimeString()}] Filter: ${noWebsite ? 'No-website only' : 'All businesses'}`);
-  addLog(`[${new Date().toLocaleTimeString()}] Plan: ${plan.toUpperCase()} (${limit - used} leads remaining)`);
+  addLog(`[${new Date().toLocaleTimeString()}] Plan: ${plan.toUpperCase()} · ${limit - used} leads remaining`);
 
   // Demo mode — simulate results if backend not running
   try {
@@ -235,8 +235,16 @@ async function startExtraction() {
       return;
     }
 
-    const { jobId } = await resp.json();
+    const data = await resp.json();
+    const { jobId, queriesExpanded, queries } = data;
     currentJobId = jobId;
+    addLog(`[${new Date().toLocaleTimeString()}] ✓ Auto-expanded into ${queriesExpanded} area searches`);
+    if (queries && queries.length <= 8) {
+      queries.forEach(q => addLog(`  → ${q}`));
+    } else if (queries) {
+      queries.slice(0, 5).forEach(q => addLog(`  → ${q}`));
+      addLog(`  → ...and ${queries.length - 5} more areas`);
+    }
     addLog(`[${new Date().toLocaleTimeString()}] Job started · ID: ${jobId}`);
 
     pollInterval = setInterval(() => pollJob(jobId), 5000);
@@ -330,28 +338,57 @@ function downloadCSV() {
   a.click();
 }
 
+// Location expansion map (mirrors backend/locations.js for demo mode)
+const DEMO_EXPANSIONS = {
+  'lagos': 25, 'abuja': 15, 'port harcourt': 9, 'kano': 8, 'ibadan': 8, 'nigeria': 12,
+  'accra': 12, 'kumasi': 7, 'ghana': 7,
+  'texas': 12, 'california': 9, 'florida': 10, 'new york': 9, 'usa': 12,
+  'london': 13, 'uk': 10,
+  'toronto': 8, 'canada': 8,
+  'sydney': 8, 'australia': 7,
+  'dubai': 10, 'uae': 5,
+};
+
+function getExpansionCount(location) {
+  const loc = location.toLowerCase();
+  for (const key of Object.keys(DEMO_EXPANSIONS)) {
+    if (loc.includes(key)) return DEMO_EXPANSIONS[key];
+  }
+  return 1;
+}
+
 // Demo mode — generates sample data when backend is offline
 function runDemoMode(keyword, location, noWebsite) {
-  const sampleData = generateSampleLeads(keyword, location, noWebsite, 50);
+  const areaCount = getExpansionCount(location);
+  const totalLeads = areaCount * 150;
+  const sampleData = generateSampleLeads(keyword, location, noWebsite, Math.min(totalLeads, 200));
   currentCSVData = sampleData;
 
-  let i = 0;
-  const interval = setInterval(() => {
-    i += 5;
-    addLog(`[${new Date().toLocaleTimeString()}] ⟳ Scanning Google Maps... ${i} businesses found`);
-    if (i >= 50) {
-      clearInterval(interval);
-      addLog(`[${new Date().toLocaleTimeString()}] ✓ Demo complete — 50 sample leads (connect backend for real data)`);
-      renderTable(sampleData);
-      setDone(true);
+  addLog(`[${new Date().toLocaleTimeString()}] ✓ Auto-expanded into ${areaCount} area searches`);
+  addLog(`[${new Date().toLocaleTimeString()}] ⟳ Running ${areaCount} parallel searches...`);
 
-      const users = JSON.parse(localStorage.getItem('lh_users') || '{}');
-      if (!users[user.email]) users[user.email] = {};
-      users[user.email].used = (users[user.email].used || 0) + 50;
-      localStorage.setItem('lh_users', JSON.stringify(users));
-      loadUsage();
+  let found = 0;
+  const step = Math.ceil(totalLeads / 15);
+  const interval = setInterval(() => {
+    found = Math.min(found + step, totalLeads);
+    addLog(`[${new Date().toLocaleTimeString()}] ⟳ ${found.toLocaleString()} businesses found so far...`);
+    if (found >= totalLeads) {
+      clearInterval(interval);
+      addLog(`[${new Date().toLocaleTimeString()}] ✓ Deduplicating results...`);
+      setTimeout(() => {
+        const finalCount = Math.floor(totalLeads * 0.85);
+        addLog(`[${new Date().toLocaleTimeString()}] ✓ Done — ${finalCount.toLocaleString()} unique leads extracted (demo mode)`);
+        renderTable(sampleData);
+        setDone(true);
+
+        const users = JSON.parse(localStorage.getItem('lh_users') || '{}');
+        if (!users[user.email]) users[user.email] = {};
+        users[user.email].used = (users[user.email].used || 0) + Math.min(finalCount, 200);
+        localStorage.setItem('lh_users', JSON.stringify(users));
+        loadUsage();
+      }, 800);
     }
-  }, 800);
+  }, 600);
 }
 
 function generateSampleLeads(keyword, location, noWebsite, count) {

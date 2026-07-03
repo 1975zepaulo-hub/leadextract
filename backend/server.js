@@ -5,15 +5,14 @@ const { v4: uuidv4 } = require("uuid");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { expandQueries } = require("./locations");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Path to your compiled scraper binary
 const SCRAPER_PATH = path.join(__dirname, "..", "..", "google-maps-scraper", "google-maps-scraper.exe");
 
-// Plan limits (number of results allowed per extraction)
 const PLAN_LIMITS = {
   free: 100,
   starter: 5000,
@@ -21,25 +20,19 @@ const PLAN_LIMITS = {
   agency: 100000,
 };
 
-// In-memory job store (swap for a DB in production)
-const jobs = {};
+const PLAN_DEPTH = { free: 1, starter: 3, growth: 6, agency: 10 };
+const PLAN_CONCURRENCY = { free: 2, starter: 4, growth: 8, agency: 16 };
 
-// In-memory usage store (swap for Supabase/DB in production)
+const jobs = {};
 const usage = {};
 
 function getUserUsage(userId) {
-  if (!usage[userId]) usage[userId] = { plan: "free", used: 0, resetAt: nextMonthDate() };
+  if (!usage[userId]) usage[userId] = { plan: "free", used: 0 };
   return usage[userId];
 }
 
-function nextMonthDate() {
-  const d = new Date();
-  d.setMonth(d.getMonth() + 1);
-  return d.toISOString();
-}
-
-// POST /api/scrape — start a scrape job
-app.post("/api/scrape", (req, res) => {
+// POST /api/scrape
+app.post("/api/scrape", async (req, res) => {
   const { keyword, location, userId = "demo", plan = "free", noWebsiteOnly = false } = req.body;
 
   if (!keyword || !location) {
@@ -51,34 +44,39 @@ app.post("/api/scrape", (req, res) => {
 
   if (userUsage.used >= limit) {
     return res.status(403).json({
-      error: `Plan limit reached. You've used ${userUsage.used}/${limit} extractions this month. Upgrade to continue.`,
+      error: `Plan limit reached (${userUsage.used}/${limit}). Upgrade to continue.`,
     });
   }
+
+  // Auto-expand into sub-area queries
+  const queries = expandQueries(keyword, location);
 
   const jobId = uuidv4();
   const tmpDir = path.join(os.tmpdir(), "leadsaas", jobId);
   fs.mkdirSync(tmpDir, { recursive: true });
 
-  const queryFile = path.join(tmpDir, "query.txt");
+  const queryFile = path.join(tmpDir, "queries.txt");
   const resultsFile = path.join(tmpDir, "results.csv");
-  const query = `${keyword} in ${location}`;
 
-  fs.writeFileSync(queryFile, query, "utf8");
+  fs.writeFileSync(queryFile, queries.join("\n"), "utf8");
 
   jobs[jobId] = {
     id: jobId,
     status: "running",
-    query,
+    keyword,
+    location,
+    queries,
     noWebsiteOnly,
     resultsFile,
     startedAt: new Date().toISOString(),
     userId,
     plan,
+    totalResults: 0,
     logs: [],
   };
 
-  const depth = plan === "free" ? 1 : plan === "starter" ? 3 : plan === "growth" ? 6 : 10;
-  const concurrency = plan === "free" ? 2 : plan === "starter" ? 4 : 8;
+  const depth = PLAN_DEPTH[plan] || 1;
+  const concurrency = PLAN_CONCURRENCY[plan] || 2;
 
   const args = [
     "-input", queryFile,
@@ -89,77 +87,94 @@ app.post("/api/scrape", (req, res) => {
   ];
 
   const proc = spawn(SCRAPER_PATH, args);
-
   proc.stdout.on("data", (d) => jobs[jobId].logs.push(d.toString()));
   proc.stderr.on("data", (d) => jobs[jobId].logs.push(d.toString()));
 
   proc.on("close", (code) => {
-    jobs[jobId].status = code === 0 ? "done" : "error";
-    jobs[jobId].finishedAt = new Date().toISOString();
+    const job = jobs[jobId];
+    job.status = code === 0 ? "done" : "error";
+    job.finishedAt = new Date().toISOString();
 
     if (code === 0 && fs.existsSync(resultsFile)) {
-      let rows = fs.readFileSync(resultsFile, "utf8").split("\n").filter(Boolean);
-      const header = rows[0];
-      let data = rows.slice(1);
+      let lines = fs.readFileSync(resultsFile, "utf8").split("\n").filter(Boolean);
+      const header = lines[0];
+      let data = lines.slice(1);
 
+      // Deduplicate by title+address (columns 2 and 4 in default CSV)
+      const seen = new Set();
+      data = data.filter((row) => {
+        const key = row.split(",").slice(0, 5).join(",");
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      // Filter no-website if requested
       if (noWebsiteOnly) {
         const headers = header.split(",");
         const websiteIdx = headers.findIndex((h) => h.toLowerCase().includes("website"));
         if (websiteIdx !== -1) {
           data = data.filter((row) => {
-            const cols = row.split(",");
-            return !cols[websiteIdx] || cols[websiteIdx].trim() === "";
+            const col = row.split(",")[websiteIdx];
+            return !col || col.trim() === "";
           });
         }
       }
 
-      jobs[jobId].totalResults = data.length;
+      job.totalResults = data.length;
       userUsage.used += data.length;
 
-      // Save filtered results back
-      const filtered = [header, ...data].join("\n");
-      fs.writeFileSync(resultsFile, filtered, "utf8");
+      fs.writeFileSync(resultsFile, [header, ...data].join("\n"), "utf8");
     }
   });
 
-  res.json({ jobId, status: "running", query });
+  res.json({
+    jobId,
+    status: "running",
+    keyword,
+    location,
+    queriesExpanded: queries.length,
+    queries,
+  });
 });
 
-// GET /api/job/:id — check job status
+// GET /api/job/:id
 app.get("/api/job/:id", (req, res) => {
   const job = jobs[req.params.id];
   if (!job) return res.status(404).json({ error: "Job not found" });
   res.json({
     id: job.id,
     status: job.status,
-    query: job.query,
+    keyword: job.keyword,
+    location: job.location,
+    queriesExpanded: job.queries?.length || 1,
     totalResults: job.totalResults || 0,
     startedAt: job.startedAt,
     finishedAt: job.finishedAt || null,
   });
 });
 
-// GET /api/job/:id/download — download CSV
+// GET /api/job/:id/download
 app.get("/api/job/:id/download", (req, res) => {
   const job = jobs[req.params.id];
   if (!job) return res.status(404).json({ error: "Job not found" });
-  if (job.status !== "done") return res.status(400).json({ error: "Job not finished yet" });
-  if (!fs.existsSync(job.resultsFile)) return res.status(404).json({ error: "Results file not found" });
+  if (job.status !== "done") return res.status(400).json({ error: "Job not finished" });
+  if (!fs.existsSync(job.resultsFile)) return res.status(404).json({ error: "File not found" });
 
-  const filename = `leads-${job.query.replace(/\s+/g, "-")}.csv`;
+  const filename = `leads-${job.keyword}-${job.location}.csv`.replace(/\s+/g, "-").toLowerCase();
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.setHeader("Content-Type", "text/csv");
   fs.createReadStream(job.resultsFile).pipe(res);
 });
 
-// GET /api/usage/:userId — get usage info
+// GET /api/usage/:userId
 app.get("/api/usage/:userId", (req, res) => {
   const u = getUserUsage(req.params.userId);
   const limit = PLAN_LIMITS[u.plan] || PLAN_LIMITS.free;
   res.json({ plan: u.plan, used: u.used, limit, remaining: limit - u.used });
 });
 
-// Upgrade plan (mock — wire to Stripe webhook in production)
+// POST /api/upgrade
 app.post("/api/upgrade", (req, res) => {
   const { userId, plan } = req.body;
   if (!PLAN_LIMITS[plan]) return res.status(400).json({ error: "Invalid plan" });
@@ -170,4 +185,4 @@ app.post("/api/upgrade", (req, res) => {
 });
 
 const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => console.log(`LeadsSaaS backend running on http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`LeadsSaaS backend on http://localhost:${PORT}`));
