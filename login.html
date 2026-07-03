@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Login — Freelance LeadsHub</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen flex items-center justify-center px-4">
+
+<div class="w-full max-w-md">
+  <div class="text-center mb-8">
+    <a href="index.html" class="text-2xl font-extrabold text-green-600">L Freelance LeadsHub</a>
+    <p class="text-gray-500 text-sm mt-1">Extract business leads instantly</p>
+  </div>
+
+  <!-- Tabs -->
+  <div class="flex bg-white rounded-xl border border-gray-200 mb-6 overflow-hidden">
+    <button id="tab-login" onclick="showTab('login')" class="flex-1 py-3 text-sm font-semibold bg-green-600 text-white transition">Log In</button>
+    <button id="tab-signup" onclick="showTab('signup')" class="flex-1 py-3 text-sm font-semibold text-gray-500 hover:bg-gray-50 transition">Sign Up</button>
+  </div>
+
+  <!-- Login Form -->
+  <div id="form-login" class="bg-white rounded-2xl border border-gray-200 p-8 shadow-sm">
+    <h2 class="text-xl font-bold mb-6">Welcome back</h2>
+    <div class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+        <input type="email" id="login-email" placeholder="you@example.com" class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+        <input type="password" id="login-password" placeholder="••••••••" class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+      </div>
+      <button onclick="doLogin()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg text-sm transition">Log In</button>
+    </div>
+    <p id="login-error" class="text-red-500 text-xs mt-3 hidden"></p>
+    <p class="text-center text-sm text-gray-400 mt-4">Don't have an account? <button onclick="showTab('signup')" class="text-green-600 font-semibold">Sign up free</button></p>
+  </div>
+
+  <!-- Signup Form -->
+  <div id="form-signup" class="bg-white rounded-2xl border border-gray-200 p-8 shadow-sm hidden">
+    <h2 class="text-xl font-bold mb-1">Create your account</h2>
+    <p class="text-gray-500 text-sm mb-6">Free forever · No credit card needed</p>
+    <div class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Full Name</label>
+        <input type="text" id="signup-name" placeholder="John Doe" class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+        <input type="email" id="signup-email" placeholder="you@example.com" class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+        <input type="password" id="signup-password" placeholder="Min 8 characters" class="w-full border border-gray-300 rounded-lg px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+      </div>
+      <button onclick="doSignup()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg text-sm transition">Create Free Account</button>
+    </div>
+    <p id="signup-error" class="text-red-500 text-xs mt-3 hidden"></p>
+    <p class="text-center text-sm text-gray-400 mt-4">Already have an account? <button onclick="showTab('login')" class="text-green-600 font-semibold">Log in</button></p>
+  </div>
+
+</div>
+
+<script>
+  // Check if redirected to signup tab
+  if (window.location.hash === '#signup') showTab('signup');
+
+  function showTab(tab) {
+    document.getElementById('form-login').classList.toggle('hidden', tab !== 'login');
+    document.getElementById('form-signup').classList.toggle('hidden', tab !== 'signup');
+    document.getElementById('tab-login').className = `flex-1 py-3 text-sm font-semibold transition ${tab === 'login' ? 'bg-green-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`;
+    document.getElementById('tab-signup').className = `flex-1 py-3 text-sm font-semibold transition ${tab === 'signup' ? 'bg-green-600 text-white' : 'text-gray-500 hover:bg-gray-50'}`;
+  }
+
+  function doLogin() {
+    const email = document.getElementById('login-email').value.trim();
+    const pass = document.getElementById('login-password').value;
+    const err = document.getElementById('login-error');
+
+    if (!email || !pass) { err.textContent = 'Please fill in all fields.'; err.classList.remove('hidden'); return; }
+
+    const users = JSON.parse(localStorage.getItem('lh_users') || '{}');
+    if (!users[email] || users[email].password !== pass) {
+      err.textContent = 'Incorrect email or password.'; err.classList.remove('hidden'); return;
+    }
+
+    localStorage.setItem('lh_user', JSON.stringify({ email, name: users[email].name, plan: users[email].plan || 'free' }));
+    window.location.href = 'dashboard.html';
+  }
+
+  function doSignup() {
+    const name = document.getElementById('signup-name').value.trim();
+    const email = document.getElementById('signup-email').value.trim();
+    const pass = document.getElementById('signup-password').value;
+    const err = document.getElementById('signup-error');
+
+    if (!name || !email || !pass) { err.textContent = 'Please fill in all fields.'; err.classList.remove('hidden'); return; }
+    if (pass.length < 8) { err.textContent = 'Password must be at least 8 characters.'; err.classList.remove('hidden'); return; }
+
+    const users = JSON.parse(localStorage.getItem('lh_users') || '{}');
+    if (users[email]) { err.textContent = 'Email already registered. Please log in.'; err.classList.remove('hidden'); return; }
+
+    users[email] = { name, password: pass, plan: 'free', used: 0 };
+    localStorage.setItem('lh_users', JSON.stringify(users));
+    localStorage.setItem('lh_user', JSON.stringify({ email, name, plan: 'free' }));
+    window.location.href = 'dashboard.html';
+  }
+</script>
+</body>
+</html>
