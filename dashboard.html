@@ -392,21 +392,55 @@ function runDemoMode(keyword, location, noWebsite) {
 }
 
 function generateSampleLeads(keyword, location, noWebsite, count) {
-  const headers = 'title,category,phone,email,website,address,rating,review_count';
+  const headers = 'link,title,category,phone,email,website,address,rating,review_count';
+
+  const prefixes = ['Premier','Golden','Royal','City','Central','New','Elite','Grand','Top','First','Star','Excel','Prime','Alpha','Classic'];
+  const suffixes = {
+    restaurants: ['Kitchen','Buka','Eatery','Diner','Grill','Bistro','Restaurant','Foods','Canteen','Cuisine'],
+    dentists: ['Dental Clinic','Dental Care','Smile Clinic','Dental Centre','Orthodontics','Dental Practice','Smiles','Dental Studio'],
+    salons: ['Hair Salon','Beauty Salon','Hair Studio','Beauty Lounge','Style Hub','Glam Studio','Hair & Beauty'],
+    hotels: ['Hotel','Suites','Lodge','Inn','Guesthouse','Residences','Apartments'],
+    pharmacies: ['Pharmacy','Chemist','Drugstore','Health Pharmacy','Medical Store'],
+    gyms: ['Fitness','Gym','Health Club','Fitness Centre','Sports Club','Wellness Centre'],
+    default: ['Services','Solutions','Centre','Hub','Place','Zone','Base'],
+  };
+
+  const streets = ['Allen Avenue','Awolowo Road','Broad Street','Victoria Island Road','Lekki Expressway','Ikorodu Road','Lagos-Ibadan Expressway','Adeola Odeku Street','Ozumba Mbadiwe Avenue','Bode Thomas Street'];
+  const k = keyword.toLowerCase().split(' ')[0];
+  const sfx = suffixes[k] || suffixes.default;
+
   const rows = [];
-  for (let i = 1; i <= count; i++) {
+  const used = new Set();
+  for (let i = 0; i < count; i++) {
+    let name;
+    do {
+      const pre = prefixes[Math.floor(Math.random() * prefixes.length)];
+      const suf = sfx[Math.floor(Math.random() * sfx.length)];
+      name = `${pre} ${suf}`;
+    } while (used.has(name));
+    used.add(name);
+
     const hasWebsite = !noWebsite && i % 3 !== 0;
-    const website = hasWebsite ? `www.${keyword.replace(/\s/g,'')}${i}.com` : '';
-    const email = hasWebsite ? `info@${keyword.replace(/\s/g,'')}${i}.com` : '';
+    const slug = name.toLowerCase().replace(/\s+/g, '').replace(/[^a-z]/g,'');
+    const website = hasWebsite ? `www.${slug}.com` : '';
+    const email = hasWebsite ? `info@${slug}.com` : '';
+    const phone = `+234 ${['80','81','70','90','91'][i%5]}${Math.floor(10000000 + Math.random()*89999999)}`;
+    const street = streets[i % streets.length];
+    const rating = (3.4 + Math.random() * 1.6).toFixed(1);
+    const reviews = Math.floor(5 + Math.random() * 800);
+    const cid = Math.floor(1e16 + Math.random() * 9e16);
+    const gmapsUrl = `https://www.google.com/maps/place/${encodeURIComponent(name)}/@/data=!4m2!3m1!1s0x${cid.toString(16)}`;
+
     rows.push([
-      `${keyword.split(' ')[0]} Business ${i}`,
+      gmapsUrl,
+      name,
       keyword,
-      `+234 80${Math.floor(1000000 + Math.random()*9000000)}`,
+      phone,
       email,
       website,
-      `${i} Main Street, ${location}`,
-      (3.5 + Math.random() * 1.5).toFixed(1),
-      Math.floor(10 + Math.random() * 500)
+      `${street}, ${location}`,
+      rating,
+      reviews
     ].join(','));
   }
   return [headers, ...rows].join('\n');
